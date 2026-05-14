@@ -58,6 +58,7 @@ st.sidebar.markdown("---")
 st.sidebar.header("🛠️ Outil & Précision")
 tool_diameter = st.sidebar.number_input("Diamètre de la fraise [mm]", value=0.0, min_value=0.0, step=0.1, help="0 pour aucune compensation. Décale le tracé vers l'extérieur.")
 simplification = st.sidebar.slider("Simplification des courbes", 0.0, 0.05, 0.005, format="%.4f", help="Plus la valeur est haute, moins il y a de petits segments (évite les saccades).")
+use_arcs = st.sidebar.toggle("Utiliser les Arcs (G2/G3)", value=False, help="Tente de convertir les courbes en commandes circulaires pour plus de fluidité.")
 
 st.sidebar.markdown("---")
 st.sidebar.header("👁️ Détection des contours")
@@ -113,7 +114,7 @@ if uploaded_file is not None:
         
         if st.button("🚀 GÉNÉRER LE G-CODE"):
             with st.spinner("Génération des instructions G-code..."):
-                gcode_text = generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate, feed_rate_z)
+                gcode_text = generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate, feed_rate_z, use_arcs=use_arcs)
                 
                 st.success(f"✅ G-code généré ! Profondeur totale : {z_depth}mm en {int(np.ceil(z_depth/z_pass))} passes.")
                 
