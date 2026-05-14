@@ -1,9 +1,9 @@
 import cv2
 import numpy as np
 
-def extract_contours(image_bytes, threshold1=100, threshold2=200, scale=1.0, use_canny=True):
+def extract_contours(image_bytes, threshold1=100, threshold2=200, scale=1.0, use_canny=True, simplification=0.1, tool_diameter=0.0):
     """
-    Extrait les contours d'une image PNG et les met à l'échelle.
+    Extrait les contours d'une image PNG, applique une simplification et une compensation d'outil.
     """
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -16,45 +16,56 @@ def extract_contours(image_bytes, threshold1=100, threshold2=200, scale=1.0, use
     if use_canny:
         edges = cv2.Canny(blurred, threshold1, threshold2)
     else:
-        # Threshold simple pour les images contrastées (logo noir sur blanc)
         _, edges = cv2.threshold(blurred, threshold1, 255, cv2.THRESH_BINARY_INV)
-        
+    
+    # Compensation du diamètre de l'outil (Offset) via morphologie mathématique
+    # On travaille en pixels : offset_px = (diamètre / 2) / scale
+    if tool_diameter > 0:
+        offset_px = int(round((tool_diameter / 2) / scale))
+        if offset_px > 0:
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (offset_px*2+1, offset_px*2+1))
+            # Pour un contour externe sur fond noir (edges), dilater agrandit le tracé vers l'extérieur
+            edges = cv2.dilate(edges, kernel, iterations=1)
+
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # Mise à l'échelle et inversion de l'axe Y pour correspondre au repère CNC
-    # (L'origine (0,0) est souvent en bas à gauche sur une CNC)
     h, w = img.shape[:2]
     scaled_contours = []
+    
     for cnt in contours:
-        if len(cnt) < 2: continue
-        scaled_cnt = cnt.astype(np.float32).copy()
-        # Scale
+        # Simplification du contour (Ramer-Douglas-Peucker)
+        # epsilon est la distance max entre le contour original et le simplifié
+        epsilon = simplification * cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        
+        if len(approx) < 2: continue
+        
+        scaled_cnt = approx.astype(np.float32).copy()
+        # Mise à l'échelle
         scaled_cnt[:, 0, 0] *= scale # X
         scaled_cnt[:, 0, 1] *= scale # Y
         
-        # Invert Y: Y_cnc = (Height_px * scale) - Y_px * scale
+        # Inversion axe Y (CNC)
         scaled_cnt[:, 0, 1] = (h * scale) - scaled_cnt[:, 0, 1]
         
         scaled_contours.append(scaled_cnt)
         
     return scaled_contours, img
 
-def generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate):
+def generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate, feed_rate_z):
     """
-    Génère le G-code avec gestion multi-passes.
-    z_depth et z_pass sont positifs dans l'UI mais convertis en négatif pour le travail.
+    Génère le G-code avec gestion multi-passes et vitesses séparées.
     """
     gcode = []
     
     # En-tête
-    gcode.append("; G-code genere par PNG-to-Gcode")
+    gcode.append("; G-code genere par PNG-to-Gcode Expert")
     gcode.append("G21 ; Unites en mm")
     gcode.append("G90 ; Positionnement absolu")
     gcode.append("G94 ; Avance en mm/min")
     gcode.append("M3 S1000 ; Broche ON")
     gcode.append(f"G0 Z{z_safe:.3f} ; Hauteur de securite")
     
-    # Calcul du nombre de passes
     num_passes = int(np.ceil(z_depth / z_pass)) if z_pass > 0 else 1
     
     for cnt in contours:
@@ -66,8 +77,8 @@ def generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate):
         for p in range(1, num_passes + 1):
             current_z = -min(p * z_pass, z_depth)
             
-            # Plongee en Z (moitie de la vitesse d'avance)
-            gcode.append(f"G1 Z{current_z:.3f} F{feed_rate/2:.0f}")
+            # Plongee en Z avec sa propre vitesse
+            gcode.append(f"G1 Z{current_z:.3f} F{feed_rate_z:.0f}")
             
             # Suivi du contour
             for pt in cnt:

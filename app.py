@@ -39,7 +39,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🛠️ PNG to G-code Converter Expert")
+st.title("🛠️ PNG to G-code pour les collègues")
 st.markdown("Convertissez vos images en fichiers G-code (.nc) pour votre machine CNC DIY.")
 
 # Sidebar parameters
@@ -47,8 +47,17 @@ st.sidebar.header("⚙️ Paramètres de Coupe")
 z_safe = st.sidebar.number_input("Hauteur de sécurité ($Z_{safe}$) [mm]", value=5.0, step=0.5, help="Hauteur pour les déplacements rapides G0")
 z_depth = st.sidebar.number_input("Profondeur totale ($Z_{depth}$) [mm]", value=6.0, min_value=0.1, step=0.5, help="Profondeur finale de la coupe")
 z_pass = st.sidebar.number_input("Profondeur par passe [mm]", value=2.0, min_value=0.1, step=0.5, help="Profondeur maximale par passage de l'outil")
-feed_rate = st.sidebar.number_input("Vitesse d'avance ($F$) [mm/min]", value=1000, min_value=1, step=100)
+
+col_f1, col_f2 = st.sidebar.columns(2)
+feed_rate = col_f1.number_input("Avance XY [mm/min]", value=1000, min_value=1, step=100)
+feed_rate_z = col_f2.number_input("Avance Z [mm/min]", value=300, min_value=1, step=50)
+
 scale = st.sidebar.number_input("Échelle (Pixel vers mm)", value=0.1, format="%.4f", help="Facteur de multiplication pour passer des pixels aux mm")
+
+st.sidebar.markdown("---")
+st.sidebar.header("🛠️ Outil & Précision")
+tool_diameter = st.sidebar.number_input("Diamètre de la fraise [mm]", value=0.0, min_value=0.0, step=0.1, help="0 pour aucune compensation. Décale le tracé vers l'extérieur.")
+simplification = st.sidebar.slider("Simplification des courbes", 0.0, 0.05, 0.005, format="%.4f", help="Plus la valeur est haute, moins il y a de petits segments (évite les saccades).")
 
 st.sidebar.markdown("---")
 st.sidebar.header("👁️ Détection des contours")
@@ -78,7 +87,9 @@ if uploaded_file is not None:
             threshold1=thresh1, 
             threshold2=thresh2, 
             scale=scale, 
-            use_canny=use_canny
+            use_canny=use_canny,
+            simplification=simplification,
+            tool_diameter=tool_diameter
         )
     
     if contours is not None and len(contours) > 0:
@@ -102,7 +113,7 @@ if uploaded_file is not None:
         
         if st.button("🚀 GÉNÉRER LE G-CODE"):
             with st.spinner("Génération des instructions G-code..."):
-                gcode_text = generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate)
+                gcode_text = generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate, feed_rate_z)
                 
                 st.success(f"✅ G-code généré ! Profondeur totale : {z_depth}mm en {int(np.ceil(z_depth/z_pass))} passes.")
                 
