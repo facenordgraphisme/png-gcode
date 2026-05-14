@@ -1,7 +1,7 @@
 import streamlit as st
 import cv2
 import numpy as np
-from converter import extract_contours, generate_gcode
+from cnc_engine import extract_contours, generate_gcode
 import matplotlib.pyplot as plt
 from PIL import Image
 import io
