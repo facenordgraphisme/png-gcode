@@ -57,12 +57,14 @@ scale = st.sidebar.number_input("Échelle (Pixel vers mm)", value=0.1, format="%
 st.sidebar.markdown("---")
 st.sidebar.header("🛠️ Outil & Précision")
 tool_diameter = st.sidebar.number_input("Diamètre de la fraise [mm]", value=0.0, min_value=0.0, step=0.1, help="0 pour aucune compensation. Décale le tracé vers l'extérieur.")
+cut_type = st.sidebar.radio("Type de découpe", ["Extérieur (Découper la forme)", "Intérieur (Graver / Creuser)"], help="Définit de quel côté du trait la fraise va passer.")
+is_outside_cut = cut_type.startswith("Extérieur")
 simplification = st.sidebar.slider("Simplification des courbes", 0.0, 0.05, 0.005, step=0.0005, format="%.4f", help="Plus la valeur est haute, moins il y a de petits segments (évite les saccades).")
 use_arcs = st.sidebar.toggle("Utiliser les Arcs (G2/G3)", value=False, help="Tente de convertir les courbes en commandes circulaires pour plus de fluidité.")
 
 st.sidebar.markdown("---")
 st.sidebar.header("👁️ Détection des contours")
-use_canny = st.sidebar.toggle("Utiliser Canny (Contours)", value=True)
+use_canny = st.sidebar.toggle("Utiliser Canny (Contours)", value=False, help="Désactivez pour les formes pleines avec compensation d'outil.")
 if use_canny:
     thresh1 = st.sidebar.slider("Canny Seuil Bas", 0, 500, 100)
     thresh2 = st.sidebar.slider("Canny Seuil Haut", 0, 500, 200)
@@ -90,7 +92,8 @@ if uploaded_file is not None:
             scale=scale, 
             use_canny=use_canny,
             simplification=simplification,
-            tool_diameter=tool_diameter
+            tool_diameter=tool_diameter,
+            is_outside_cut=is_outside_cut
         )
     
     if contours is not None and len(contours) > 0:
@@ -116,7 +119,10 @@ if uploaded_file is not None:
             with st.spinner("Génération des instructions G-code..."):
                 gcode_text = generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate, feed_rate_z, use_arcs=use_arcs)
                 
+                size_kb = len(gcode_text.encode('utf-8')) / 1024.0
+                
                 st.success(f"✅ G-code généré ! Profondeur totale : {z_depth}mm en {int(np.ceil(z_depth/z_pass))} passes.")
+                st.info(f"📏 Poids final du fichier : **{size_kb:.1f} Ko**")
                 
                 # Visualisation du G-code
                 with st.expander("📝 Aperçu des premières lignes du fichier"):

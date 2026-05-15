@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from shapely.geometry import Polygon
 
-def extract_contours(image_bytes, threshold1=100, threshold2=200, scale=1.0, use_canny=True, simplification=0.1, tool_diameter=0.0):
+def extract_contours(image_bytes, threshold1=100, threshold2=200, scale=1.0, use_canny=True, simplification=0.1, tool_diameter=0.0, is_outside_cut=True):
     """
     Extrait les contours d'une image PNG, applique une simplification et une compensation d'outil.
     """
@@ -68,11 +68,16 @@ def extract_contours(image_bytes, threshold1=100, threshold2=200, scale=1.0, use
                     if not poly.is_valid:
                         poly = poly.buffer(0)
                         
-                    # Aggrandir l'extérieur, rétrécir l'intérieur (trous)
-                    offset_dist = radius if is_top_level else -radius
-                    
+                    # Si c'est une coupe extérieure : on agrandit l'extérieur, on rétrécit l'intérieur (trous)
+                    # Si c'est une coupe intérieure (graver l'intérieur) : on rétrécit l'extérieur, on agrandit l'intérieur
+                    if is_outside_cut:
+                        offset_dist = radius if is_top_level else -radius
+                    else:
+                        offset_dist = -radius if is_top_level else radius
+                        
                     try:
-                        buffered = poly.buffer(offset_dist, resolution=8, join_style=1) # ROUND
+                        # join_style=2 (MITRE) préserve les angles vifs, idéal pour la typographie !
+                        buffered = poly.buffer(offset_dist, join_style=2) 
                     except:
                         buffered = poly
                         
@@ -85,7 +90,7 @@ def extract_contours(image_bytes, threshold1=100, threshold2=200, scale=1.0, use
                             ext_coords = np.array(geom.exterior.coords)
                             if len(ext_coords) > 0:
                                 ext_cnt = ext_coords.reshape(-1, 1, 2).astype(np.float32)
-                                # Re-simplifier après l'offset (Shapely génère beaucoup de points sur les arrondis)
+                                # Re-simplifier après l'offset
                                 eps_mm = simplification * cv2.arcLength(ext_cnt, True)
                                 ext_cnt = cv2.approxPolyDP(ext_cnt, eps_mm, True)
                                 if len(ext_cnt) >= 2:
@@ -117,7 +122,6 @@ def get_arc_params(p1, p2, p3):
     radius = np.sqrt((x1 - center_x)**2 + (y1 - center_y)**2)
     
     # Déterminer le sens (produit vectoriel)
-    # Vecteur AB et BC
     v1 = (x2 - x1, y2 - y1)
     v2 = (x3 - x2, y3 - y2)
     z = v1[0] * v2[1] - v1[1] * v2[0]
@@ -148,9 +152,13 @@ def generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate, feed_rate_z, us
             return f" F{f_val:.0f}"
         return ""
 
-    for cnt in contours:
+    # Optimisation de trajectoire : trier les contours de gauche à droite
+    # Cela évite que la machine fasse de grands allers-retours sur le plateau
+    valid_contours = [cnt for cnt in contours if len(cnt.reshape(-1, 2)) >= 2]
+    sorted_contours = sorted(valid_contours, key=lambda cnt: np.min(cnt.reshape(-1, 2)[:, 0]))
+
+    for cnt in sorted_contours:
         pts = cnt.reshape(-1, 2)
-        if len(pts) < 2: continue
         
         # Aller au point de départ
         gcode.append(f"G0 X{pts[0][0]:.3f} Y{pts[0][1]:.3f}")
@@ -163,7 +171,6 @@ def generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate, feed_rate_z, us
             i = 0
             while i < len(pts):
                 p1 = pts[i]
-                # Point suivant (bouclage si dernier point pour fermer le contour)
                 idx2 = (i + 1) % len(pts)
                 idx3 = (i + 2) % len(pts)
                 
@@ -176,8 +183,21 @@ def generate_gcode(contours, z_safe, z_depth, z_pass, feed_rate, feed_rate_z, us
                 
                 if arc:
                     cx, cy, r, cw = arc
-                    # On ne fait un arc que si le rayon est raisonnable (pas trop grand/infini)
-                    if 0.1 < r < 1000:
+                    # Vérifier si c'est une courbe douce, mais PAS une ligne droite
+                    v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
+                    v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
+                    norm_v1 = np.linalg.norm(v1)
+                    norm_v2 = np.linalg.norm(v2)
+                    
+                    is_smooth = False
+                    if norm_v1 > 0 and norm_v2 > 0:
+                        cos_theta = np.dot(v1, v2) / (norm_v1 * norm_v2)
+                        # Rejette les lignes droites (>0.999) et les angles vifs (<0.90 = virage de plus de 25 degrés)
+                        # Cela garantit que seuls les vrais arrondis (O, C, B) deviennent des arcs !
+                        if 0.90 < cos_theta < 0.999: 
+                            is_smooth = True
+                            
+                    if 0.1 < r < 500 and is_smooth:
                         cmd = "G2" if cw else "G3"
                         # I, J sont relatifs au point de départ (p1)
                         I = cx - p1[0]
