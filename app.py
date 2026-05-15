@@ -57,7 +57,7 @@ scale = st.sidebar.number_input("Échelle (Pixel vers mm)", value=0.1, format="%
 st.sidebar.markdown("---")
 st.sidebar.header("🛠️ Outil & Précision")
 tool_diameter = st.sidebar.number_input("Diamètre de la fraise [mm]", value=0.0, min_value=0.0, step=0.1, help="0 pour aucune compensation. Décale le tracé vers l'extérieur.")
-simplification = st.sidebar.slider("Simplification des courbes", 0.0, 0.05, 0.005, format="%.4f", help="Plus la valeur est haute, moins il y a de petits segments (évite les saccades).")
+simplification = st.sidebar.slider("Simplification des courbes", 0.0, 0.05, 0.005, step=0.0005, format="%.4f", help="Plus la valeur est haute, moins il y a de petits segments (évite les saccades).")
 use_arcs = st.sidebar.toggle("Utiliser les Arcs (G2/G3)", value=False, help="Tente de convertir les courbes en commandes circulaires pour plus de fluidité.")
 
 st.sidebar.markdown("---")
